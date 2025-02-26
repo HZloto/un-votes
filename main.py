@@ -1,17 +1,67 @@
 #!/usr/bin/env python
 import pandas as pd
 import argparse
+import numpy as np
+
+def standardize_country_name(name):
+    """Standardize country names to handle duplicates and variations"""
+    name_mapping = {
+        "BOLIVIA (PLURINATIOANL STATE OF)": "BOLIVIA (PLURINATIONAL STATE OF)",
+        "VENEZUELA": "VENEZUELA (BOLIVARIAN REPUBLIC OF)",
+        "MYANMAR": "MYANMAR",
+        "BURMA": "MYANMAR",
+        "CZECHIA": "CZECHIA",
+        "CZECH REPUBLIC": "CZECHIA",
+        "ESWATINI": "ESWATINI",
+        "SWAZILAND": "ESWATINI",
+        "TÜRKIYE": "TURKEY",
+        "CABO VERDE": "CABO VERDE",
+        "CAPE VERDE": "CABO VERDE",
+        "TIMOR-LESTE": "TIMOR-LESTE",
+        "EAST TIMOR": "TIMOR-LESTE",
+        "CONGO": "CONGO",
+        "CONGO (DEMOCRATIC REPUBLIC OF)": "DEMOCRATIC REPUBLIC OF THE CONGO",
+        "ZAIRE": "DEMOCRATIC REPUBLIC OF THE CONGO",
+        "DEMOCRATIC KAMPUCHEA": "CAMBODIA",
+        "KHMER REPUBLIC": "CAMBODIA",
+        "UNION OF SOUTH AFRICA": "SOUTH AFRICA",
+        "UPPER VOLTA": "BURKINA FASO",
+        "DAHOMEY": "BENIN",
+        "CEYLON": "SRI LANKA"
+    }
+    return name_mapping.get(name.strip(), name.strip())
 
 def load_data(csv_path):
     # Read CSV with low_memory=False to avoid DtypeWarning.
     df = pd.read_csv(csv_path, low_memory=False)
+    
     # Convert the 'Date' column, coercing errors to NaT
-    # Remove deprecated infer_datetime_format parameter
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    # Drop rows where 'Date' could not be parsed.
+    
+    # Drop rows where 'Date' could not be parsed
     df = df.dropna(subset=['Date'])
+    
+    # Clean and standardize column names
+    new_columns = []
+    for col in df.columns:
+        if isinstance(col, str):
+            # Skip non-country columns
+            if col.upper() in ['DATE', 'COUNCIL', 'TITLE', 'RESOLUTION', 'TOTAL VOTES', 
+                             'NO-VOTE COUNT', 'ABSENT COUNT', 'NO COUNT', 'YES COUNT', 'LINK', 'TOKEN']:
+                new_columns.append(col.strip())
+            else:
+                # Standardize country names
+                new_columns.append(standardize_country_name(col))
+        else:
+            new_columns.append(col)
+    
+    df.columns = new_columns
+    
+    # If there are duplicate columns after standardization, keep the first occurrence
+    _, unique_cols = np.unique(df.columns, return_index=True)
+    df = df.iloc[:, sorted(unique_cols)]
+    
     return df
-
 
 def filter_time_period(df, start_date, end_date):
     """
@@ -109,10 +159,11 @@ def analyze_alignment_shift(df, target_country, start_date, end_date, min_votes=
     Parameters:
     - df: The complete dataframe with voting data
     - target_country: The country to analyze alignment with
-    - start_date: The start date of the analysis period
-    - end_date: The end date of the analysis period
+    - start_date: Start date string in YYYY-MM-DD format
+    - end_date: End date string in YYYY-MM-DD format
     - min_votes: Minimum number of votes required in each half to be considered
     """
+    # Convert date strings to datetime objects
     start = pd.to_datetime(start_date)
     end = pd.to_datetime(end_date)
     midpoint = start + (end - start) / 2
@@ -120,6 +171,9 @@ def analyze_alignment_shift(df, target_country, start_date, end_date, min_votes=
     # Filter data for first and second half of the period
     first_half = df[(df['Date'] >= start) & (df['Date'] < midpoint)]
     second_half = df[(df['Date'] >= midpoint) & (df['Date'] <= end)]
+    
+    if len(first_half) == 0 or len(second_half) == 0:
+        return None, None, 0, 0, 0, 0, 0
     
     # Compute alignments for both periods
     first_alignments, first_vote_counts = compute_alignment(first_half, target_country)

@@ -258,10 +258,65 @@ def load_country_coords():
         "COTE D'IVOIRE": {"lat": 7.5400, "lon": -5.5471}
     }
 
+# Clean column names by stripping whitespace
+def clean_column_names(df):
+    """Clean column names by stripping whitespace"""
+    df.columns = [col.strip() if isinstance(col, str) else col for col in df.columns]
+    return df
+
 # Load and cache the data
 @st.cache_data
 def load_cached_data():
-    return load_data("UN_DATA.csv")
+    df = load_data("UN_DATA.csv")
+    return clean_column_names(df)  # Clean column names
+
+# Debug function to check column names in the dataset
+def check_country_in_dataset(df, country_name):
+    """Check if a country exists in the dataset and find similar country names"""
+    columns = df.columns.tolist()
+    exact_match = country_name in columns
+    
+    # Find similar country names (case insensitive)
+    similar = [col for col in columns if country_name.upper() in col.upper()]
+    
+    return exact_match, similar
+
+def remove_duplicate_countries(country_list):
+    """Remove duplicate country names and their variations"""
+    # Create a map of standard names
+    name_mapping = {
+        "BOLIVIA (PLURINATIOANL STATE OF)": "BOLIVIA (PLURINATIONAL STATE OF)",
+        "VENEZUELA": "VENEZUELA (BOLIVARIAN REPUBLIC OF)",
+        "MYANMAR": "MYANMAR",
+        "BURMA": "MYANMAR",
+        "CZECHIA": "CZECHIA",
+        "CZECH REPUBLIC": "CZECHIA",
+        "ESWATINI": "ESWATINI",
+        "SWAZILAND": "ESWATINI",
+        "TÜRKIYE": "TURKEY",
+        "CABO VERDE": "CABO VERDE",
+        "CAPE VERDE": "CABO VERDE",
+        "TIMOR-LESTE": "TIMOR-LESTE",
+        "EAST TIMOR": "TIMOR-LESTE",
+        "CONGO": "CONGO",
+        "CONGO (DEMOCRATIC REPUBLIC OF)": "DEMOCRATIC REPUBLIC OF THE CONGO",
+        "ZAIRE": "DEMOCRATIC REPUBLIC OF THE CONGO",
+        "DEMOCRATIC KAMPUCHEA": "CAMBODIA",
+        "KHMER REPUBLIC": "CAMBODIA"
+    }
+    
+    # Create a set of unique standardized names
+    seen = set()
+    unique_list = []
+    
+    for country in country_list:
+        # Get the standardized name if it exists, otherwise use the original
+        std_name = name_mapping.get(country, country)
+        if std_name not in seen:
+            seen.add(std_name)
+            unique_list.append(std_name)
+    
+    return sorted(unique_list)
 
 # Main app
 def main():
@@ -324,204 +379,153 @@ def main():
             if st.button("🔁 Reset", use_container_width=True):
                 st.session_state.run_analysis = False
 
-    # Display analysis status
-    if st.session_state.run_analysis:
-        st.sidebar.success("✅ Analysis complete!")
-    
-    # Rest of the main content
+    # Main analysis content
     if st.session_state.run_analysis:
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Filter data
-        status_text.text("Filtering data by date range...")
-        progress_bar.progress(20)
+        # Filter data and compute alignments
+        status_text.text("Analyzing voting patterns...")
+        progress_bar.progress(30)
+        
         filtered_df = filter_time_period(df, start_date, end_date)
         
-        # Compute alignments
-        status_text.text("Computing voting alignments...")
-        progress_bar.progress(40)
-        percentages, vote_counts = compute_alignment(filtered_df, selected_country)
-        
-        # Get top allies and enemies
-        status_text.text("Finding top allies and enemies...")
-        progress_bar.progress(60)
-        allies, enemies, allies_pct, enemies_pct, allies_votes, enemies_votes = find_top_allies_and_enemies(
-            percentages, vote_counts, top_n=top_n, min_votes=min_votes
-        )
-        
-        # Analyze shifts
-        status_text.text("Analyzing alignment shifts...")
-        progress_bar.progress(80)
-        shift_results = analyze_alignment_shift(
-            df, selected_country, start_date, end_date, min_votes=min_votes
-        )
-        
-        progress_bar.progress(100)
-        status_text.text("Analysis complete!")
-        
-        # Clear progress indicators after a short delay
-        time.sleep(0.5)
-        progress_bar.empty()
-        status_text.empty()
-
-        # Rest of the visualization code remains the same
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🤝 Top Allies")
-            fig_allies = go.Figure()
-            fig_allies.add_trace(go.Bar(
-                x=[f"{country}<br>({votes} votes)" for country, votes in zip(allies, allies_votes)],
-                y=[pct * 100 for pct in allies_pct],
-                marker_color='rgb(26, 118, 255)',
-                text=[f"{pct*100:.1f}%" for pct in allies_pct],
-                textposition='auto',
-            ))
-            fig_allies.update_layout(
-                title=f"Top {top_n} Allies",
-                yaxis_title="Vote Alignment (%)",
-                showlegend=False,
-                height=400
-            )
-            st.plotly_chart(fig_allies, use_container_width=True)
-
-        with col2:
-            st.subheader("⚔️ Top Opponents")
-            fig_enemies = go.Figure()
-            fig_enemies.add_trace(go.Bar(
-                x=[f"{country}<br>({votes} votes)" for country, votes in zip(enemies, enemies_votes)],
-                y=[pct * 100 for pct in enemies_pct],
-                marker_color='rgb(255, 64, 64)',
-                text=[f"{pct*100:.1f}%" for pct in enemies_pct],
-                textposition='auto',
-            ))
-            fig_enemies.update_layout(
-                title=f"Top {top_n} Opponents",
-                yaxis_title="Vote Alignment (%)",
-                showlegend=False,
-                height=400
-            )
-            st.plotly_chart(fig_enemies, use_container_width=True)
-
-        # Alignment Shifts Analysis
-        st.subheader("📊 Alignment Shifts Over Time")
-        if shift_results[0]:  # If there are significant shifts
-            country, direction, shift_value, first_half, second_half, first_votes, second_votes = shift_results
+        try:
+            percentages, vote_counts = compute_alignment(filtered_df, selected_country)
             
-            # Create a before/after comparison chart
-            shift_data = pd.DataFrame({
-                'Period': ['First Half', 'Second Half'],
-                'Alignment': [first_half * 100, second_half * 100],
-                'Votes': [first_votes, second_votes]
-            })
-            
-            fig_shift = go.Figure()
-            fig_shift.add_trace(go.Bar(
-                x=shift_data['Period'],
-                y=shift_data['Alignment'],
-                text=[f"{val:.1f}%<br>({votes} votes)" for val, votes in zip(shift_data['Alignment'], shift_data['Votes'])],
-                textposition='auto',
-                marker_color=['rgb(158,202,225)', 'rgb(94,158,217)'],
-            ))
-            fig_shift.update_layout(
-                title=f"Biggest Shift: {country}<br>{abs(shift_value*100):.1f}% {'increase' if direction == 'positive' else 'decrease'}",
-                yaxis_title="Vote Alignment (%)",
-                showlegend=False,
-                height=400
+            # Find top allies and enemies
+            allies, enemies, allies_pct, enemies_pct, allies_votes, enemies_votes = find_top_allies_and_enemies(
+                percentages, vote_counts, top_n=top_n, min_votes=min_votes
             )
-            st.plotly_chart(fig_shift, use_container_width=True)
 
-        # Map visualization
-        st.subheader("🗺️ Global Voting Alignment Map")
-        coords = load_country_coords()
-        
-        # Prepare data for the map
-        map_data = []
-        missing_coords = []
-        for country, alignment in percentages.items():
-            if alignment is not None and vote_counts[country] >= min_votes:
-                if country in coords:
-                    map_data.append({
-                        "country": country,
-                        "lat": coords[country]["lat"],
-                        "lon": coords[country]["lon"],
-                        "alignment": alignment * 100,
-                        "votes": vote_counts[country]
-                    })
-                else:
-                    missing_coords.append(country)
-        
-        if missing_coords:
-            st.warning(
-                "Some countries with sufficient votes are not shown on the map due to missing coordinates: " +
-                ", ".join(missing_coords[:5]) + 
-                ("..." if len(missing_coords) > 5 else "")
-            )
-        
-        if map_data:
-            map_df = pd.DataFrame(map_data)
+            # Display results in a clean layout
+            st.subheader(f"Voting Alignment Analysis: {selected_country}")
+            st.caption(f"Analysis period: {start_date.strftime('%B %d, %Y')} to {end_date.strftime('%B %d, %Y')}")
             
-            # Create the map visualization
-            fig_map = px.scatter_mapbox(
-                map_df,
-                lat="lat",
-                lon="lon",
-                color="alignment",
-                size="votes",
-                hover_name="country",
-                hover_data={
-                    "alignment": ":.1f",
-                    "votes": True,
-                    "lat": False,
-                    "lon": False
-                },
-                color_continuous_scale=["#ff0d0d", "#ffd000", "#1e88e5"],  # Red -> Yellow -> Blue
-                size_max=25,  # Reduced from 50 to 25
-                zoom=1.5,     # Slightly increased zoom
-                title=f"Global Voting Alignment with {selected_country}"
+            # Create two columns for allies and enemies
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 🤝 Closest Allies")
+                for i, (ally, pct, votes) in enumerate(zip(allies, allies_pct, allies_votes), 1):
+                    with st.container():
+                        st.markdown(
+                            f"""
+                            <div style='padding: 10px; border-radius: 5px; margin-bottom: 10px;'>
+                                <strong>{i}. {ally}</strong><br>
+                                <span style='color: #1f77b4;'>Alignment: {pct*100:.1f}%</span><br>
+                                <small>Based on {votes} common votes</small>
+                            </div>
+                            """, 
+                            unsafe_allow_html=True
+                        )
+
+            with col2:
+                st.markdown("### 👥 Most Opposed")
+                for i, (enemy, pct, votes) in enumerate(zip(enemies, enemies_pct, enemies_votes), 1):
+                    with st.container():
+                        st.markdown(
+                            f"""
+                            <div style='padding: 10px; border-radius: 5px; margin-bottom: 10px;'>
+                                <strong>{i}. {enemy}</strong><br>
+                                <span style='color: #ff7f0e;'>Alignment: {pct*100:.1f}%</span><br>
+                                <small>Based on {votes} common votes</small>
+                            </div>
+                            """, 
+                            unsafe_allow_html=True
+                        )
+
+            # Analyze and display alignment shifts
+            progress_bar.progress(60)
+            status_text.text("Analyzing alignment shifts...")
+            
+            shift_results = analyze_alignment_shift(
+                filtered_df, 
+                selected_country, 
+                start_date.strftime('%Y-%m-%d'), 
+                end_date.strftime('%Y-%m-%d'), 
+                min_votes=min_votes
             )
             
-            fig_map.update_layout(
-                mapbox_style="carto-positron",
-                height=600,
-                margin={"r":0,"t":30,"l":0,"b":0},
-                coloraxis_colorbar_title="Alignment %",
-                # Update marker settings for better visibility
-                mapbox=dict(
-                    zoom=1.5
-                ),
-                # Improve color bar appearance
-                coloraxis=dict(
-                    colorbar=dict(
-                        title=dict(text="Alignment %", side="right"),
-                        thickness=15,
-                        len=0.9,
-                        x=0.95
+            shift_country, shift_direction, shift_value, first_half_value, second_half_value, first_half_votes, second_half_votes = shift_results
+            
+            if shift_country:
+                st.markdown("### 📊 Notable Alignment Shift")
+                with st.container():
+                    st.markdown(
+                        f"""
+                        <div style='padding: 15px; border-radius: 10px; background-color: #f2f2f2f; margin: 10px 0;'>
+                            <strong>{shift_country}</strong> showed the most significant change:<br>
+                            • Initial alignment: <span style='color: #1f77b4;'>{first_half_value*100:.1f}%</span> ({first_half_votes} votes)<br>
+                            • Final alignment: <span style='color: #1f77b4;'>{second_half_value*100:.1f}%</span> ({second_half_votes} votes)<br>
+                            • <strong>Overall shift: {abs(shift_value)*100:.1f}% {shift_direction}</strong>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
                     )
-                )
-            )
             
-            st.plotly_chart(fig_map, use_container_width=True)
-        else:
-            st.warning("Insufficient data for map visualization. Try adjusting the minimum votes threshold or date range.")
-    else:
-        # Show initial message
-        st.info("👆 Set your analysis parameters in the sidebar and click 'Run Analysis' to start")
-        
-        # Add some example insights
-        st.markdown("""
-        ### What you can discover:
-        - Find out which countries vote most similarly to your selected country
-        - Identify the strongest opponents in UN voting patterns
-        - Track how relationships between countries have changed over time
-        - Visualize global voting alignment patterns on an interactive map
-        
-        ### Tips:
-        - Try different minimum vote thresholds to focus on more significant relationships
-        - Adjust the date range to analyze specific historical periods
-        - Compare different countries to understand various diplomatic alignments
-        """)
+            # Create map visualization
+            progress_bar.progress(90)
+            status_text.text("Generating global alignment map...")
+            
+            st.markdown("### 🗺️ Global Voting Alignment Map")
+            
+            coords = load_country_coords()
+            map_data = []
+            missing_coords = []
+            
+            for country, alignment in percentages.items():
+                if alignment is not None and vote_counts[country] >= min_votes:
+                    if country in coords:
+                        map_data.append({
+                            "country": country,
+                            "lat": coords[country]["lat"],
+                            "lon": coords[country]["lon"],
+                            "alignment": alignment * 100,
+                            "votes": vote_counts[country]
+                        })
+                    else:
+                        missing_coords.append(country)
+
+            if map_data:
+                map_df = pd.DataFrame(map_data)
+                
+                fig = px.scatter_map(
+                    map_df,
+                    lat="lat",
+                    lon="lon",
+                    color="alignment",
+                    size="votes",
+                    hover_name="country",
+                    hover_data={
+                        "alignment": ":.1f",
+                        "votes": True,
+                        "lat": False,
+                        "lon": False
+                    },
+                    color_continuous_scale=["#ff0d0d", "#ffd000", "#1e88e5"],
+                    size_max=25,
+                    zoom=1.5,
+                    title=f"Global Voting Alignment with {selected_country}"
+                )
+                
+                fig.update_layout(
+                    mapbox_style="carto-positron",
+                    height=600,
+                    margin={"r":0,"t":30,"l":0,"b":0},
+                    coloraxis_colorbar_title="Alignment %"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Clear progress indicators
+            status_text.empty()
+            progress_bar.empty()
+            
+        except Exception as e:
+            st.error(f"An error occurred during the analysis: {str(e)}")
+            status_text.empty()
+            progress_bar.empty()
 
 if __name__ == "__main__":
     main()
